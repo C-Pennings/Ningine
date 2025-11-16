@@ -1,6 +1,6 @@
 # core/input.py
 import pygame
-from typing import Dict, Any, List
+from typing import Dict, Any
 from funcs import load_json  # Your JSON loader
 
 class Input:
