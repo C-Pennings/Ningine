@@ -16,12 +16,13 @@ class Renderer: #uses moderngl to render objects
         pass
 
 class Window: #used to define a window
-    def __init__(self):
-        pass
+    def __init__(self, title: str, icon: pygame.Surface | None):
+        self.title = title or ''
+        self.icon = icon
+
 
     def get_window(self):
         pass
-
 
 
 import sys
@@ -38,7 +39,8 @@ ctx = moderngl.create_context()
 
 clock = pygame.time.Clock()
 
-img = pygame.image.load('img.png')
+img = pygame.Surface((100, 100))
+img.fill((250, 100, 0))
 
 quad_buffer = ctx.buffer(data=array('f', [
     # position (x, y), uv coords (x, y)
