@@ -1,86 +1,105 @@
 # core/input.py
+# NINGINE — Universal Input System (Week 2 Day 1 Complete)
+
 import pygame
 from typing import Dict, Any
-from funcs import load_json  # Your JSON loader
+from .funcs import load_json  # your existing helper
+
 
 class Input:
     """
-    Data-driven input system.
-    - Loads config from JSON (future: bind actions to keys)
-    - Tracks pressed/down/released for GUI + games
-    - Immutable state snapshot per frame
+    Data-driven input manager.
+    - Supports future input_config.json (action bindings)
+    - Tracks held / pressed / released for mouse + keyboard
+    - Returns clean immutable state dict every frame
     """
-    def __init__(self, path: str = None):
-        self.path = path
-        self.config = self._load_config(path)
-        self._reset_frame_state()
 
-    def _load_config(self, path: str) -> Dict[str, Any]:
-        """Load JSON or fallback to default."""
-        if path:
-            try:
-                return load_json(path)
-            except Exception as e:
-                print(f"[Input] Failed to load {path}: {e}")
-        
-        # Default structure – future: bind "jump" → pygame.K_SPACE
-        return {
-            'keys': {},           # pygame.K_w: True
+    def __init__(self, config_path: str | None = None):
+        self.config_path = config_path
+
+        # Default structure (will be overridden by JSON later)
+        default = {
+            'keys': {},  # pygame.K_w: True/False
             'mouse': {
                 'pos': [0, 0],
-                'buttons': {1: False, 2: False, 3: False},  # LMB, RMB, MMB
-                'pressed': {1: False, 2: False, 3: False},
-                'released': {1: False, 2: False, 3: False}
+                'buttons': {1: False, 2: False, 3: False},     # LMB, RMB, MMB held
+                'pressed': {1: False, 2: False, 3: False},     # one-frame down
+                'released': {1: False, 2: False, 3: False}    # one-frame up
             }
         }
 
-    def _reset_frame_state(self):
-        """Reset one-frame events."""
+        if config_path:
+            try:
+                self.config = load_json(config_path)
+                print(f"[Input] Loaded config from {config_path}")
+            except Exception as e:
+                print(f"[Input] Failed to load {config_path} → using default ({e})")
+                self.config = default
+        else:
+            self.config = default
+
+        # Ensure mouse sub-dicts exist even if JSON is incomplete
+        mouse = self.config.setdefault('mouse', {})
+        mouse.setdefault('pos', [0, 0])
+        mouse.setdefault('buttons', {1: False, 2: False, 3: False})
+        mouse.setdefault('pressed', {1: False, 2: False, 3: False})
+        mouse.setdefault('released', {1: False, 2: False, 3: False})
+
+    def _reset_one_frame_events(self):
+        """Clear pressed/released every frame."""
         for btn in self.config['mouse']['pressed']:
             self.config['mouse']['pressed'][btn] = False
             self.config['mouse']['released'][btn] = False
 
-    def update(self) -> None:
-        """Poll events, update state. Call once per frame."""
-        self._reset_frame_state()
-        events = pygame.event.get()
+    def update(self) -> Dict[str, Any]:
+        """
+        Call once per frame.
+        Returns immutable snapshot for GUI / game logic.
+        """
+        self._reset_one_frame_events()
 
-        # Update mouse pos
+        # Update mouse position every frame
         self.config['mouse']['pos'] = list(pygame.mouse.get_pos())
 
-        for event in events:
+        for event in pygame.event.get():
+            # Global quit
             if event.type == pygame.QUIT:
                 pygame.quit()
-                raise SystemExit
+                raise SystemExit("Window closed")
 
+            # Keyboard
             elif event.type == pygame.KEYDOWN:
                 self.config['keys'][event.key] = True
-
             elif event.type == pygame.KEYUP:
                 self.config['keys'][event.key] = False
 
+            # Mouse buttons
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 btn = event.button
                 if btn in (1, 2, 3):
                     self.config['mouse']['buttons'][btn] = True
-                    self.config['mouse']['pressed'][btn] = True
+                    # held
+                    self.config['mouse']['pressed'][btn] = True                     # one-frame
 
             elif event.type == pygame.MOUSEBUTTONUP:
                 btn = event.button
                 if btn in (1, 2, 3):
-                    self.config['mouse']['buttons'][btn] = False
-                    self.config['mouse']['released'][btn] = True
+                    self.config['mouse']['buttons'][btn] = False                   # no longer held
+                    self.config['mouse']['released'][btn] = True                    # one-frame
 
-    # ——— ACCESSORS ———
+        # Return clean snapshot
+        return self.get_state()
+
+    # ——— PUBLIC ACCESSORS ———
 
     def get_state(self) -> Dict[str, Any]:
-        """Immutable snapshot for GUI/game logic."""
+        """Immutable snapshot used by GUI, camera, game logic."""
         return {
             'mouse_pos': tuple(self.config['mouse']['pos']),
-            'mouse_down': {k: v for k, v in self.config['mouse']['buttons'].items()},
-            'mouse_pressed': {k: v for k, v in self.config['mouse']['pressed'].items()},
-            'mouse_released': {k: v for k, v in self.config['mouse']['released'].items()},
-            'keys': {k: v for k, v in self.config['keys'].items()}
+            'mouse_down': self.config['mouse']['buttons'].copy(),
+            'mouse_pressed': self.config['mouse']['pressed'].copy(),
+            'mouse_released': self.config['mouse']['released'].copy(),
+            'keys': self.config['keys'].copy()
         }
 
     def get_mouse_pos(self) -> tuple[int, int]:

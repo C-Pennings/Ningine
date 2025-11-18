@@ -1,22 +1,24 @@
+# test_render.py
 from core.render import Renderer, Cube3D
-from core.input import Input  # Your class
-import time
+from core.input import Input
 import pygame
 
-r = Renderer()
-input = Input()
+r = Renderer(1280, 720)
+input_sys = Input()
+
 cube = Cube3D(r.ctx)
 r.add_3d(cube)
 
 clock = pygame.time.Clock()
-last_time = time.time()
-running = True
 
-while running:
-    dt = time.time() - last_time
-    last_time = time.time()
-    state = input.update()  # Your input.get_state()
+print("Hold RIGHT MOUSE BUTTON to look around")
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            exit()
 
-    r.render(dt, state)
-
+    state = input_sys.update()
+    r.render(0.016, state)   # ~60 FPS
     clock.tick(60)
+    pygame.display.flip()
