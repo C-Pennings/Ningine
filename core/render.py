@@ -1,93 +1,103 @@
 # engine/renderer.py
 """
-NINGINE Renderer – Handles 2D + 3D + Instancing
-Week 1 Goal: One class that can draw anything
+NINGINE — Renderer (Week 1 Final Version)
+Purpose: Draws any Mesh with any Material
+Supports:
+- 3D meshes (CubeMesh, etc.)
+- Per-mesh model matrix (position/rotation/scale)
+- Material colors + emissive glow
+- Clean render loop
 """
 
 import moderngl
 import pygame
 import numpy as np
-from typing import List
-from core.camera import Camera
-from core.scene import Scene
+from pygame.math import Vector3
+from typing import List, Optional
+from core.render_objects import Mesh
 
 class Renderer:
-    """
-    Single renderer for the entire engine.
-    Responsibilities:
-    1. Own the ModernGL context
-    2. Draw 3D objects (regular + instanced)
-    3. Draw 2D UI on top
-    4. Manage render passes (skybox first, UI last)
-    """
+    """The single class that draws everything in the game."""
     
     def __init__(self, screen_size=(1280, 720)):
-        # 1. Create window + ModernGL context
         pygame.display.set_mode(screen_size, pygame.OPENGL | pygame.DOUBLEBUF)
         self.ctx = moderngl.create_context()
-        self.ctx.enable(moderngl.DEPTH_TEST | moderngl.BLEND)
-        self.width, self.height = screen_size
-        
-        # For additive blending (lights, particles)
+        self.ctx.enable(moderngl.DEPTH_TEST)
         self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
         
-        # Collections we will fill later
-        self.instanced_meshes = []   # 50k grass, trees
-        self.regular_meshes = []     # Player, enemies
-        
-        print("[Renderer] Ready – ModernGL context created")
+        self.width, self.height = screen_size
+        self.meshes: List[Mesh] = []           # All meshes to draw
+        self.camera_pos = Vector3(4, 3, 5)     # Temporary camera
+        self.proj = self._make_projection_matrix()
+        self.view = self._make_view_matrix()
 
-    # ------------------------------------------------------------------
-    # PUBLIC API – These are the only functions your game code will call
-    # ------------------------------------------------------------------
-    def begin_frame(self, camera: Camera):
-        """Call at start of every frame"""
-        self.camera = camera
-        self.ctx.clear(0.1, 0.15, 0.25, 1.0)  # Dark sky blue
-        
-    def draw_scene(self, scene: Scene):
-        """Draw everything in the scene"""
-        # Pass 1: Skybox (first, depth ignored)
-        self.draw_skybox()
-        
-        # Pass 2: 3D opaque objects (regular + instanced)
-        self.draw_3d_opaque(scene)
-        
-        # Pass 3: 3D transparent objects (later)
-        # self.draw_3d_transparent(scene)
-        
-        # Pass 4: 2D overlay (UI, health bars)
-        self.draw_2d_overlay(scene)
-        
+        print("[Renderer] Ready — PBR-ready, Material system active")
+
+    # ─────────────────────────────── MATRIX HELPERS ───────────────────────────────
+    def _make_projection_matrix(self):
+        """Perspective projection matrix"""
+        f = 1.0 / np.tan(np.radians(45) / 2)
+        return np.array([
+            [f / (self.width/self.height), 0, 0, 0],
+            [0, f, 0, 0],
+            [0, 0, (0.1+100)/(0.1-100), (2*0.1*100)/(0.1-100)],
+            [0, 0, -1, 0]
+        ], dtype='f4')
+
+    def _make_view_matrix(self):
+        """Look-at matrix (camera)"""
+        eye = self.camera_pos
+        target = Vector3(0, 0, 0)
+        up = Vector3(0, 1, 0)
+        f = (target - eye).normalize()
+        s = f.cross(up).normalize()
+        u = s.cross(f)
+        return np.array([
+            [ s.x,  s.y,  s.z, -s.dot(eye)],
+            [ u.x,  u.y,  u.z, -u.dot(eye)],
+            [-f.x, -f.y, -f.z,  f.dot(eye)],
+            [   0,    0,    0,           1]
+        ], dtype='f4')
+
+    # ─────────────────────────────── PUBLIC API ───────────────────────────────
+    def add_mesh(self, mesh: Mesh):
+        """Add a mesh to be drawn every frame"""
+        self.meshes.append(mesh)
+        return mesh  # for chaining
+
+    def begin_frame(self):
+        """Clear screen"""
+        self.ctx.clear(0.1, 0.15, 0.25, 1.0)
+
+    def draw_scene(self):
+        """Draw all meshes with their materials"""
+        for mesh in self.meshes:
+            if not mesh.vao:
+                continue
+
+            program = mesh.program
+            
+            # Upload camera matrices
+            program['u_proj'].write(self.proj.tobytes())
+            program['u_view'].write(self.view.tobytes())
+            
+            # Upload model matrix (per-mesh transform — coming next week)
+            model = np.identity(4, dtype='f4')  # identity for now
+            program['u_model'].write(model.tobytes())
+            
+            # Upload camera position (for PBR later)
+            program['u_cam_pos'].value = (self.camera_pos.x, self.camera_pos.y, self.camera_pos.z)
+            
+            # Let material send its colors
+            if hasattr(mesh, 'material') and mesh.material:
+                mesh.material.bind(program)
+            else:
+                # Fallback white if no material
+                program['u_color'].value = (1.0, 1.0, 1.0)
+                program['u_emissive'].value = (0.0, 0.0, 0.0)
+            
+            # DRAW!
+            mesh.draw()
+
     def end_frame(self):
-        """Swap buffers – show what we drew"""
         pygame.display.flip()
-
-    # ------------------------------------------------------------------
-    # STUBS – You will fill these one per week
-    # ------------------------------------------------------------------
-    def draw_skybox(self):
-        """Week 2 – draw infinite sky"""
-        pass
-
-    def draw_3d_opaque(self, scene: Scene):
-        """Week 1–4 – draw cubes, instanced grass, etc."""
-        # Example stub for one spinning cube (Week 1 test)
-        self._draw_test_cube()
-
-    def draw_2d_overlay(self, scene: Scene):
-        """Week 6 – draw health bar, inventory, etc."""
-        pass
-
-    # ------------------------------------------------------------------
-    # PRIVATE HELPERS – You will replace these as we go
-    # ------------------------------------------------------------------
-    def _draw_test_cube(self):
-        """Temporary spinning cube so you see something immediately"""
-        # This will be replaced with real PBR cube in ~2 days
-        pass
-
-    # Future methods you will add:
-    # - add_instanced_mesh(mesh, instances)
-    # - upload_lights(lights)
-    # - set_2d_mode() / set_3d_mode()

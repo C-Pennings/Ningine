@@ -2,11 +2,13 @@
 import pygame
 from core.render_objects import CubeMesh
 from core.render import Renderer
+from core.camera import Camera
 
 pygame.init()
 renderer = Renderer()
 
 # Create one cube
+camera = Camera()
 cube = CubeMesh(renderer.ctx)
 renderer.meshes = [cube]  # We'll make this cleaner later
 

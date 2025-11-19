@@ -65,10 +65,7 @@ class Mesh:
     def draw(self):
         """Draw this mesh — called by Renderer"""
         if self.vao:
-            if self.indexed:
-                self.vao.render(index_count=self.vertex_count)
-            else:
-                self.vao.render(count=self.vertex_count)
+            self.vao.render(moderngl.TRIANGLES)  # ← CLEANEST AND SAFEST
 
     def __repr__(self):
         return f"Mesh(vertices={self.vertex_count})"
@@ -81,7 +78,7 @@ class CubeMesh(Mesh):
     """
     
     def __init__(self, ctx: moderngl.Context):
-        super().__init__(ctx, shader_name="simple")
+        super().__init__(ctx, shader_name="default")
         print("[CubeMesh] Purple cube ready")
 
     def _build_geometry(self):
@@ -128,10 +125,18 @@ class Material:
 
     def bind(self, program: moderngl.Program):
         """Send material data to shader"""
-        program['u_albedo'].write(self.color.tobytes())
-        program['u_metallic'].value = self.metallic
-        program['u_roughness'].value = self.roughness
-        program['u_emissive'].write(self.emissive.tobytes())
+        if 'u_albedo' in program:
+            program['u_albedo'].write(self.color.tobytes())
+        if 'u_metallic' in program:
+            program['u_metallic'].value = self.metallic
+        if 'u_roughness' in program:
+            program['u_roughness'].value = self.roughness
+        if 'u_color' in program:
+            program['u_color'].write(self.color.tobytes())
+        if 'u_emissive' in program:
+            program['u_emissive'].write(self.emissive.tobytes())
+        if 'u_alpha' in program:
+            program['u_alpha'].value = 1.0  # or self.alpha if you add it
 
     def __repr__(self):
         return f"Material(color={self.color}, metallic={self.metallic:.1f})"
