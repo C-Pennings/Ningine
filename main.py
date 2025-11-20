@@ -19,4 +19,4 @@ while True:
     renderer.begin_frame()
     renderer.draw_scene()
     renderer.end_frame()
-    clock.tick(60)
+    clock.tick(144)

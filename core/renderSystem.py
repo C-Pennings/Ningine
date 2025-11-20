@@ -17,6 +17,14 @@ class Renderer:
         # Fixed camera that shows the cube
         self.proj = self._perspective()
         self.view = self._look_at(Vector3(0, -3, 15), Vector3(0, 0, 0), Vector3(0, 1, 0))
+        # Debug overlay (on-screen FPS and info)
+        pygame.font.init()
+        self._font = pygame.font.SysFont(None, 18)
+        self._overlay = DebugOverlay(self.ctx, self.width, self.height, self._font)
+        self._fps_clock = pygame.time.Clock()
+        # Update overlay text once per second to reduce jitter
+        self._overlay_last = 0.0
+        self._overlay_interval = 1.0
 
     def _perspective(self):
         # Proper OpenGL perspective matrix (right-handed, -1 to 1 depth)
@@ -71,7 +79,19 @@ class Renderer:
             prog['u_model'].write(model.T.tobytes())
 
             mesh.draw()
-
+        # Update and draw debug overlay (FPS + simple stats)
+        # tick internal clock so get_fps() returns a value
+        self._fps_clock.tick()
+        fps = self._fps_clock.get_fps()
+        now = time.time()
+        # update the overlay text only once per second
+        if now - self._overlay_last >= self._overlay_interval:
+            info = f"FPS: {fps:.1f} | Meshes: {len(self.meshes)}"
+            self._overlay.update_text(info)
+            self._overlay_last = now
+        # always render the overlay (uses cached texture)
+        self._overlay.render()
+        
     def end_frame(self):
         pygame.display.flip()
 
@@ -102,6 +122,121 @@ class Mesh:
     def draw(self):
         if self.vao:
             self.vao.render(moderngl.TRIANGLES)
+
+
+class DebugOverlay:
+    """Render a small on-screen text overlay using pygame font -> texture -> moderngl quad."""
+    def __init__(self, ctx, screen_w, screen_h, font):
+        self.ctx = ctx
+        self.screen_w = screen_w
+        self.screen_h = screen_h
+        self.font = font
+
+        # Simple textured quad shader (positions are in NDC)
+        vert = '''#version 330 core
+        in vec2 in_pos;
+        in vec2 in_uv;
+        out vec2 v_uv;
+        void main() {
+            gl_Position = vec4(in_pos, 0.0, 1.0);
+            v_uv = in_uv;
+        }'''
+
+        frag = '''#version 330 core
+        uniform sampler2D u_tex;
+        in vec2 v_uv;
+        out vec4 frag_color;
+        void main() {
+            frag_color = texture(u_tex, v_uv);
+        }'''
+
+        self.program = self.ctx.program(vertex_shader=vert, fragment_shader=frag)
+        self.program['u_tex'] = 0
+
+        # Create an empty texture placeholder; will be resized on first draw
+        self.texture = None
+
+    def _create_texture(self, w, h, data=None):
+        if self.texture is not None:
+            try:
+                self.texture.release()
+            except Exception:
+                pass
+        tex = self.ctx.texture((w, h), 4, data=data)
+        tex.build_mipmaps = False
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.texture = tex
+        return tex
+
+    def update_text(self, text):
+        """Update the overlay texture when the text changes or size changes."""
+        if text == getattr(self, '_last_text', None):
+            return
+        self._last_text = text
+
+        # Render text to a pygame surface with alpha
+        lines = str(text).split('\n')
+        padding = 6
+        line_surfs = [self.font.render(l, True, (255, 255, 255)) for l in lines]
+        w = max(s.get_width() for s in line_surfs) + padding * 2
+        h = sum(s.get_height() for s in line_surfs) + padding * 2
+
+        surf = pygame.Surface((w, h), pygame.SRCALPHA, 32)
+        surf = surf.convert_alpha()
+        y = padding
+        for s in line_surfs:
+            surf.blit(s, (padding, y))
+            y += s.get_height()
+
+        # Convert surface to bytes (RGBA) and upload to texture
+        buf = pygame.image.tostring(surf, 'RGBA', False)
+        if self.texture is None or self.texture.size != (w, h):
+            self._create_texture(w, h, buf)
+        else:
+            self.texture.write(buf)
+
+        # (re)create quad geometry for this texture size
+        margin_x = 10
+        margin_y = 10
+        x0 = (margin_x / self.screen_w) * 2.0 - 1.0
+        y0 = 1.0 - (margin_y / self.screen_h) * 2.0
+        x1 = ((margin_x + w) / self.screen_w) * 2.0 - 1.0
+        y1 = 1.0 - ((margin_y + h) / self.screen_h) * 2.0
+
+        verts = np.array([
+            x0, y0, 0.0, 0.0,
+            x1, y0, 1.0, 0.0,
+            x1, y1, 1.0, 1.0,
+            x0, y0, 0.0, 0.0,
+            x1, y1, 1.0, 1.0,
+            x0, y1, 0.0, 1.0,
+        ], dtype='f4')
+
+        # release old buffers if present
+        if getattr(self, 'vbo', None) is not None:
+            try:
+                self.vbo.release()
+            except Exception:
+                pass
+        if getattr(self, 'vao', None) is not None:
+            try:
+                self.vao.release()
+            except Exception:
+                pass
+
+        self.vbo = self.ctx.buffer(verts.tobytes())
+        self.vao = self.ctx.vertex_array(self.program, [(self.vbo, '2f 2f', 'in_pos', 'in_uv')])
+
+    def render(self):
+        """Render the overlay using the current texture and VAO."""
+        if self.texture is None or getattr(self, 'vao', None) is None:
+            return
+        self.ctx.disable(moderngl.DEPTH_TEST)
+        self.ctx.enable(moderngl.BLEND)
+        self.texture.use(location=0)
+        self.vao.render()
+        self.ctx.disable(moderngl.BLEND)
+        self.ctx.enable(moderngl.DEPTH_TEST)
 
 class CubeMesh(Mesh):
     def __init__(self, ctx):
