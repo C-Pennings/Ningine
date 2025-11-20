@@ -12,7 +12,9 @@ renderer.set_skybox()
 # Load and display monkey correctly
 data = import_obj('assets/models/test.obj')
 monkey = MeshObject(renderer.ctx, data, 'monkey')
-renderer.add_mesh(monkey)
+
+for _ in range(1000):
+    renderer.add_mesh(monkey)
 
 pygame.event.set_grab(True)
 pygame.mouse.set_visible(False)
@@ -66,4 +68,4 @@ while True:
     renderer.begin_frame()
     renderer.draw_scene()
     renderer.end_frame()
-    clock.tick(60)
+    clock.tick(160)
