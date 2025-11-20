@@ -1,29 +1,20 @@
 # main.py
 import pygame
-from core.render_objects import CubeMesh
 from core.render import Renderer
-from core.camera import Camera
+from core.render_objects import CubeMesh
 
 pygame.init()
-renderer = Renderer()
+renderer = Renderer((1280, 720))
 
-# Create one cube
-camera = Camera()
 cube = CubeMesh(renderer.ctx)
-renderer.meshes = [cube]  # We'll make this cleaner later
+renderer.add_mesh(cube)
 
-clock = pygame.time.Clock()
-running = True
-
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+while True:
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            quit()
 
     renderer.begin_frame()
-    for mesh in renderer.meshes:
-        mesh.draw()
+    renderer.draw_scene()
     renderer.end_frame()
-    clock.tick(60)
-
-pygame.quit()
+    pygame.time.wait(16)

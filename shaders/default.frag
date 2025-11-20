@@ -1,10 +1,11 @@
 #version 330 core
+
 out vec4 frag_color;
 
-// These uniforms will come from your Material class
-uniform vec3  u_color;       // Base color (RGB)
-uniform vec3  u_emissive;    // Glow color (added on top)
-uniform float u_alpha;       // Transparency (0.0–1.0)
+// THESE MUST MATCH EXACTLY what your Material.bind() sends
+uniform vec3 u_color;
+uniform vec3 u_emissive;
+uniform float u_alpha;
 
 void main()
 {

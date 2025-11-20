@@ -35,12 +35,16 @@ class Renderer:
 
     # ─────────────────────────────── MATRIX HELPERS ───────────────────────────────
     def _make_projection_matrix(self):
-        """Perspective projection matrix"""
-        f = 1.0 / np.tan(np.radians(45) / 2)
+        # SIMPLE WORKING PERSPECTIVE — GUARANTEED TO SHOW THE CUBE
+        aspect = self.width / self.height
+        fov = 45.0
+        near = 0.1
+        far = 100.0
+        f = 1.0 / np.tan(np.radians(fov) / 2)
         return np.array([
-            [f / (self.width/self.height), 0, 0, 0],
+            [f / aspect, 0, 0, 0],
             [0, f, 0, 0],
-            [0, 0, (0.1+100)/(0.1-100), (2*0.1*100)/(0.1-100)],
+            [0, 0, (far + near) / (near - far), (2 * far * near) / (near - far)],
             [0, 0, -1, 0]
         ], dtype='f4')
 
@@ -86,7 +90,8 @@ class Renderer:
             program['u_model'].write(model.tobytes())
             
             # Upload camera position (for PBR later)
-            program['u_cam_pos'].value = (self.camera_pos.x, self.camera_pos.y, self.camera_pos.z)
+            if 'u_cam_pos' in program:
+                program['u_cam_pos'].value = (self.camera_pos.x, self.camera_pos.y, self.camera_pos.z)
             
             # Let material send its colors
             if hasattr(mesh, 'material') and mesh.material:

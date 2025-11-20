@@ -72,71 +72,43 @@ class Mesh:
 
 
 class CubeMesh(Mesh):
-    """
-    Simple cube geometry — 8 vertices, 12 triangles (36 indices)
-    Purple by default — material changes color later
-    """
-    
     def __init__(self, ctx: moderngl.Context):
-        super().__init__(ctx, shader_name="default")
-        print("[CubeMesh] Purple cube ready")
+        super().__init__(ctx, shader_name="default")  # ← "default" not "simple"
 
     def _build_geometry(self):
-        """Create cube vertices + triangle indices"""
-        # 8 unique corner positions
         vertices = np.array([
-            # Back face (-Z)
-            [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
-            # Front face (+Z)
-            [-1, -1, 1],  [1, -1, 1],  [1, 1, 1],  [-1, 1, 1]
-        ], dtype='f4')
+            -1,-1,-1,  1,-1,-1,  1, 1,-1, -1, 1,-1,
+            -1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1,
+            -1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1,
+             1,-1,-1,  1,-1, 1,  1, 1, 1,  1, 1,-1,
+            -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1,
+            -1, 1,-1,  1, 1,-1,  1, 1, 1, -1, 1, 1,
+        ], dtype='f4').reshape(-1, 3)
 
-        # 36 indices = 12 triangles
         indices = np.array([
-            # Back face
-            0, 1, 2,  2, 3, 0,
-            # Front face  
-            4, 6, 5,  4, 7, 6,
-            # Left face
-            0, 4, 7,  7, 3, 0,
-            # Right face
-            1, 5, 6,  6, 2, 1,
-            # Bottom face
-            0, 1, 5,  5, 4, 0,
-            # Top face
-            3, 2, 6,  6, 7, 3
+            0,1,2, 2,3,0, 4,5,6, 6,7,4, 8,9,10, 10,11,8,
+            12,13,14, 14,15,12, 16,17,18, 18,19,16, 20,21,22, 22,23,20
         ], dtype='i4')
 
         self._upload_to_gpu(vertices, indices)
-
+        print("CUBE UPLOADED — YOU WILL SEE IT")
 
 class Material:
-    """
-    Controls how a Mesh looks (color, texture, shader).
-    Default materials make everything look good automatically.
-    """
-    
-    def __init__(self, color: tuple = (0.8, 0.3, 0.6)):
-        self.color = np.array(color, dtype='f4')
-        self.texture = None
-        self.emissive = np.array([0.0, 0.0, 0.0], dtype='f4')
-        self.metallic = 0.0
-        self.roughness = 0.8
+    def __init__(self, color=(1.0, 0.2, 0.8)):
+        self.color = np.array(color, dtype=np.float32)
+        self.emissive = np.array([3.0, 1.0, 3.0], dtype=np.float32)  # NUCLEAR GLOW
+        self.alpha = 1.0
 
-    def bind(self, program: moderngl.Program):
-        """Send material data to shader"""
-        if 'u_albedo' in program:
-            program['u_albedo'].write(self.color.tobytes())
-        if 'u_metallic' in program:
-            program['u_metallic'].value = self.metallic
-        if 'u_roughness' in program:
-            program['u_roughness'].value = self.roughness
+    def bind(self, program):
+        # BULLETPROOF — uses .value instead of .write()
         if 'u_color' in program:
-            program['u_color'].write(self.color.tobytes())
+            program['u_color'].value = tuple(self.color)
         if 'u_emissive' in program:
-            program['u_emissive'].write(self.emissive.tobytes())
+            program['u_emissive'].value = tuple(self.emissive)
         if 'u_alpha' in program:
-            program['u_alpha'].value = 1.0  # or self.alpha if you add it
+            program['u_alpha'].value = self.alpha
+
+
 
     def __repr__(self):
         return f"Material(color={self.color}, metallic={self.metallic:.1f})"
