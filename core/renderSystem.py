@@ -321,8 +321,23 @@ class DefaultMaterial(Material):
         super().__init__(color=(0.5, 0.5, 0.5))
 
 class Camera:
-    def __init__(self):
+    def __init__(self, pos, width, height, rot=(0,0,0)):
+        self.position = pos
+        self.rotation = rot
+
+        self.fov = 45
+        self.aspect = width/height
+    
+    def get_proj(self):
         pass
+
+    def get_view(self):
+        pass
+
+    def set_aspect(self):
+        pass
+
+    
 
 class Light:
     def __init__(self):

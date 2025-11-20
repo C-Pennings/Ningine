@@ -1,10 +1,12 @@
 # main.py
 import pygame, sys
-from core.renderSystem import Renderer, CubeMesh
+from core.renderSystem import Renderer, CubeMesh, Camera
 
 pygame.init()
 renderer = Renderer((1280, 720))
 renderer.set_skybox('assets/skybox')
+cameraSimple = Camera()
+renderer.set_camera(camera=cameraSimple)
 
 # Create one cube
 for i in range(1):
@@ -17,6 +19,8 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+
+
 
     renderer.begin_frame()
     renderer.draw_scene()
