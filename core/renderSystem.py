@@ -27,6 +27,7 @@ class Renderer:
         self._overlay_last = 0.0
         self._overlay_interval = 1.0
         self._start_time = time.time()
+        self.skybox = None
 
     def _perspective(self):
         # Proper OpenGL perspective matrix (right-handed, -1 to 1 depth)
@@ -56,6 +57,10 @@ class Renderer:
     def add_mesh(self, mesh):
         self.meshes.append(mesh)
 
+    def set_skybox(self, path='assets/skybox'):
+        """Load and attach a skybox from a directory containing 6 cube faces."""
+        self.skybox = SkyBox(self.ctx, path)
+
     def begin_frame(self):
         self.ctx.clear(0.2, 0.2, 0.3, 1.0)        # Dark gray background so pink is visible
         self.ctx.enable(moderngl.DEPTH_TEST)
@@ -65,6 +70,9 @@ class Renderer:
         proj_bytes = self.proj.T.tobytes()
         view_bytes = self.view.T.tobytes()
         elapsed = time.time() - getattr(self, '_start_time', 0.0)
+        # Render skybox first (without depth test) so it's behind all geometry
+        if getattr(self, 'skybox', None):
+            self.skybox.render(self.ctx, self.proj, self.view)
 
         # Identity model (rotation handled in shader via u_time)
         model = np.eye(4, dtype='f4')
@@ -321,40 +329,151 @@ class Light:
         pass
 
 class SkyBox:
-    def __init__(self, ctx, width, height, path='assets/skybox'):
-        
-        self.width, self.height = width, height
-        texture = ctx.texture_cube(size=(self.width, self.height), components=3, data=None)
-        
-        filenames = []
-        if os.path.exists(path) and os.path.isdir(path): #load filenames from path
-            for entry in os.listdir(path):
-                full_path = os.path.join(path, entry)
-                if os.path.isfile(full_path):
-                    filenames.append(entry)
-        
-        for i, filename in enumerate(filenames):
-            img = Image.open(filename).transpose(Image.FLIP_TOP_BOTTOM) # May need adjustment
-            # Ensure image is in RGB format
+    """
+    Loads a cubemap from a folder and renders a cube as the skybox.
+    Expected file naming includes tokens per face, e.g.:
+      - right/left/top/bottom/front/back
+      - or px/nx/py/ny/pz/nz
+    """
+    def __init__(self, ctx, path='assets/skybox', face_map=None):
+        self.ctx = ctx
+        self.texture = self._load_cubemap(ctx, path, face_map)
+
+        # Skybox shaders embedded to avoid external file dependency
+        vert = '''#version 330 core
+        layout(location=0) in vec3 in_position;
+        out vec3 v_dir;
+        uniform mat4 u_proj;
+        uniform mat4 u_view; // with zeroed translation
+        void main() {
+            v_dir = in_position;
+            vec4 pos = u_proj * u_view * vec4(in_position, 1.0);
+            gl_Position = pos.xyww; // keep at far depth
+        }'''
+
+        frag = '''#version 330 core
+        in vec3 v_dir;
+        uniform samplerCube u_cube;
+        out vec4 frag_color;
+        void main() {
+            frag_color = texture(u_cube, normalize(v_dir));
+        }'''
+
+        self.program = ctx.program(vertex_shader=vert, fragment_shader=frag)
+        self.program['u_cube'] = 0
+
+        # Cube geometry (positions only), reuse same layout as regular cube
+        v = np.array([
+            -1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1,
+            -1,-1, 1, 1,-1, 1, 1,1, 1, -1,1, 1,
+            -1,-1,-1, -1,-1, 1, -1,1, 1, -1,1,-1,
+             1,-1,-1,  1,-1, 1,  1,1, 1,  1,1,-1,
+            -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1,
+            -1, 1,-1,  1, 1,-1,  1, 1, 1, -1, 1, 1
+        ], dtype='f4').reshape(-1, 3)
+
+        i = np.array([
+            0,1,2,2,3,0, 4,5,6,6,7,4, 8,9,10,10,11,8,
+            12,13,14,14,15,12, 16,17,18,18,19,16, 20,21,22,22,23,20
+        ], dtype='i4')
+
+        self.vbo = ctx.buffer(v.tobytes())
+        self.ibo = ctx.buffer(i.tobytes())
+        self.vao = ctx.vertex_array(self.program, [(self.vbo, '3f', 'in_position')], index_buffer=self.ibo)
+
+    def _load_cubemap(self, ctx, folder, face_map=None):
+        def list_images(d):
+            if not os.path.isdir(d):
+                return []
+            files = []
+            for entry in os.listdir(d):
+                p = os.path.join(d, entry)
+                if os.path.isfile(p) and entry.lower().endswith(('.png','.jpg','.jpeg','.bmp','.tga')):
+                    files.append(p)
+            return files
+
+        files = list_images(folder)
+        if not files:
+            # Create a 1x1 blue cubemap as a fallback
+            tex = ctx.texture_cube((1,1), 3, data=None)
+            tex.write(0, bytes([0,0,255]))
+            tex.write(1, bytes([0,0,255]))
+            tex.write(2, bytes([0,0,255]))
+            tex.write(3, bytes([0,0,255]))
+            tex.write(4, bytes([0,0,255]))
+            tex.write(5, bytes([0,0,255]))
+            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            try:
+                tex.repeat_x = False
+                tex.repeat_y = False
+                tex.repeat_z = False
+            except Exception:
+                pass
+            return tex
+
+        # Resolve faces
+        tokens = face_map or {
+            'right': ['right','px','posx'],
+            'left':  ['left','nx','negx'],
+            'top':   ['top','up','py','posy'],
+            'bottom':['bottom','down','ny','negy'],
+            'front': ['front','pz','posz'],
+            'back':  ['back','nz','negz'],
+        }
+        order = ['right','left','top','bottom','front','back']
+
+        resolved = {}
+        lower_map = {p: os.path.basename(p).lower() for p in files}
+        for face in order:
+            for p, name in lower_map.items():
+                if any(tok in name for tok in tokens[face]):
+                    resolved[face] = p
+                    break
+
+        # Fallback: if not all faces found, just sort and pick first 6
+        if len(resolved) < 6 and len(files) >= 6:
+            files_sorted = sorted(files)
+            resolved = dict(zip(order, files_sorted[:6]))
+
+        # Load images and upload to cubemap
+        tex = None
+        for idx, face in enumerate(order):
+            fp = resolved.get(face)
+            if not fp:
+                # fallback to first available image
+                fp = files[0]
+            img = Image.open(fp)
             if img.mode != 'RGB':
                 img = img.convert('RGB')
-            
-            # Use a consistent size
-            width, height = img.size 
-            
-            # Upload data to the specific face
-            ctx.texture_cube(size=(width, height), components=3, data=img.tobytes(), layer=i)
-            
-        # Configure texture parameters to avoid seams and use linear filtering
-        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        texture.wrap_x = moderngl.CLAMP_TO_EDGE
-        texture.wrap_y = moderngl.CLAMP_TO_EDGE
-        texture.wrap_z = moderngl.CLAMP_TO_EDGE
+            # Flip Y to match GL origin if needed
+            #img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            w, h = img.size
+            if tex is None:
+                tex = ctx.texture_cube((w, h), 3, data=None)
+                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                try:
+                    tex.repeat_x = False
+                    tex.repeat_y = False
+                    tex.repeat_z = False
+                except Exception:
+                    pass
+            tex.write(idx, img.tobytes())
+        return tex
 
-        self.texture = texture
-    
-    def get_tex(self):
-        return self.texture
+    def render(self, ctx, proj, view):
+        # Remove translation from the view matrix
+        view_nt = view.copy()
+        view_nt[0,3] = 0.0
+        view_nt[1,3] = 0.0
+        view_nt[2,3] = 0.0
+
+        # Render skybox without depth test so it always draws behind
+        ctx.disable(moderngl.DEPTH_TEST)
+        self.program['u_proj'].write(proj.T.tobytes())
+        self.program['u_view'].write(view_nt.T.tobytes())
+        self.texture.use(location=0)
+        self.vao.render(moderngl.TRIANGLES)
+        ctx.enable(moderngl.DEPTH_TEST)
 
         
         

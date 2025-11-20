@@ -4,6 +4,7 @@ from core.renderSystem import Renderer, CubeMesh
 
 pygame.init()
 renderer = Renderer((1280, 720))
+renderer.set_skybox('assets/skybox')
 
 # Create one cube
 for i in range(10000):
