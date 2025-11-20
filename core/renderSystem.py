@@ -25,6 +25,7 @@ class Renderer:
         # Update overlay text once per second to reduce jitter
         self._overlay_last = 0.0
         self._overlay_interval = 1.0
+        self._start_time = time.time()
 
     def _perspective(self):
         # Proper OpenGL perspective matrix (right-handed, -1 to 1 depth)
@@ -59,24 +60,38 @@ class Renderer:
         self.ctx.enable(moderngl.DEPTH_TEST)
 
     def draw_scene(self):
+        # Precompute common state once per frame
+        proj_bytes = self.proj.T.tobytes()
+        view_bytes = self.view.T.tobytes()
+        elapsed = time.time() - getattr(self, '_start_time', 0.0)
+
+        # Identity model (rotation handled in shader via u_time)
+        model = np.eye(4, dtype='f4')
+        model_bytes = model.T.tobytes()
+
+        last_prog = None
         for mesh in self.meshes:
             prog = mesh.program
-            
-            # Upload matrices
-            # OpenGL expects column-major matrices; transpose our row-major numpy arrays
-            prog['u_proj'].write(self.proj.T.tobytes())
-            prog['u_view'].write(self.view.T.tobytes())
 
-            # SPINNING CUBE
-            angle = time.time() * 0.5
-            c, s = np.cos(angle), np.sin(angle)
-            model = np.array([
-                [c, 0, s, 0],
-                [0, 1, 0, 0],
-                [-s, 0, c, 0],
-                [0, 0, 0, 1]
-            ], dtype='f4')
-            prog['u_model'].write(model.T.tobytes())
+            if prog is not last_prog:
+                try:
+                    prog['u_proj'].write(proj_bytes)
+                except KeyError:
+                    pass
+                try:
+                    prog['u_view'].write(view_bytes)
+                except KeyError:
+                    pass
+                try:
+                    prog['u_time'].value = float(elapsed)
+                except KeyError:
+                    pass
+                last_prog = prog
+
+            try:
+                prog['u_model'].write(model_bytes)
+            except KeyError:
+                pass
 
             mesh.draw()
         # Update and draw debug overlay (FPS + simple stats)
@@ -104,10 +119,20 @@ class Mesh:
         self.build_geometry()
 
     def _load_shader(self, name):
+        # Cache compiled programs per context + shader name
+        cache = getattr(self.__class__, '_program_cache', None)
+        if cache is None:
+            cache = {}
+            setattr(self.__class__, '_program_cache', cache)
+        key = (id(self.ctx), name)
+        if key in cache:
+            return cache[key]
         path = Path("shaders")
         vert = (path / f"{name}.vert").read_text()
         frag = (path / f"{name}.frag").read_text()
-        return self.ctx.program(vertex_shader=vert, fragment_shader=frag)
+        prog = self.ctx.program(vertex_shader=vert, fragment_shader=frag)
+        cache[key] = prog
+        return prog
 
     def build_geometry(self):
         raise NotImplementedError
@@ -124,7 +149,6 @@ class Mesh:
         if self.vao:
             self.material.bind(program=self.program)
             self.vao.render(moderngl.TRIANGLES)
-
 
 class DebugOverlay:
     """Render a small on-screen text overlay using pygame font -> texture -> moderngl quad."""
@@ -245,21 +269,33 @@ class CubeMesh(Mesh):
         super().__init__(ctx, "default")
 
     def build_geometry(self):
-        v = np.array([
-            -1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1,
-            -1,-1,1, 1,-1,1, 1,1,1, -1,1,1,
-            -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1,
-            1,-1,-1, 1,-1,1, 1,1,1, 1,1,-1,
-            -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1,
-            -1,1,-1, 1,1,-1, 1,1,1, -1,1,1
-        ], dtype='f4').reshape(-1, 3) * 2.0
+        # Share static geometry buffers across all CubeMesh instances per-context
+        cache = getattr(CubeMesh, '_geom_cache', None)
+        if cache is None:
+            cache = {}
+            setattr(CubeMesh, '_geom_cache', cache)
+        key = id(self.ctx)
+        if key not in cache:
+            v = np.array([
+                -1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1,
+                -1,-1,1, 1,-1,1, 1,1,1, -1,1,1,
+                -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1,
+                1,-1,-1, 1,-1,1, 1,1,1, 1,1,-1,
+                -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1,
+                -1,1,-1, 1,1,-1, 1,1,1, -1,1,1
+            ], dtype='f4').reshape(-1, 3)
 
-        i = np.array([
-            0,1,2,2,3,0, 4,5,6,6,7,4, 8,9,10,10,11,8,
-            12,13,14,14,15,12, 16,17,18,18,19,16, 20,21,22,22,23,20
-        ], dtype='i4')
+            i = np.array([
+                0,1,2,2,3,0, 4,5,6,6,7,4, 8,9,10,10,11,8,
+                12,13,14,14,15,12, 16,17,18,18,19,16, 20,21,22,22,23,20
+            ], dtype='i4')
 
-        self._upload(v, i)
+            vbo = self.ctx.buffer(v.tobytes())
+            ibo = self.ctx.buffer(i.tobytes())
+            cache[key] = (vbo, ibo)
+        vbo, ibo = cache[key]
+        # Build a VAO referencing the shared buffers
+        self.vao = self.ctx.vertex_array(self.program, [(vbo, '3f', 'in_position')], index_buffer=ibo)
 
 class Material:
     def __init__(self, color=(0,0,0)):
@@ -269,9 +305,7 @@ class Material:
         try:
             program['u_color'].value = tuple(map(float, self.color))
         except KeyError:
-            pass
-        
-           
+            pass          
 
 class DefaultMaterial(Material):
     def __init__(self):
