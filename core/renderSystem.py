@@ -16,7 +16,7 @@ class Renderer:
         self.meshes = []
 
         # Camera setup
-        self.camera = Camera(Vector3(0, -3, 15), self.width, self.height, target=Vector3(0, 0, 0), up=Vector3(0, 1, 0))
+        self.camera = Camera(Vector3(0, 1, 10), self.width, self.height, target=Vector3(0, 0, 0), up=Vector3(0, 1, 0))
         self.proj = self.camera.get_proj()
         self.view = self.camera.get_view()
         # Debug overlay (on-screen FPS and info)
@@ -61,6 +61,10 @@ class Renderer:
     def set_skybox(self, path='assets/skybox'):
         """Load and attach a skybox from a directory containing 6 cube faces."""
         self.skybox = SkyBox(self.ctx, path)
+    
+    def set_camera(self, camera):
+        """Sets the camera"""
+        self.camera = camera
 
     def begin_frame(self):
         self.ctx.clear(0.2, 0.2, 0.3, 1.0)        # Dark gray background so pink is visible
@@ -68,8 +72,12 @@ class Renderer:
 
     def draw_scene(self):
         # Update matrices from camera and precompute common state once per frame
-        self.proj = self.camera.get_proj()
-        self.view = self.camera.get_view()
+        if self.camera:
+            self.proj = self.camera.get_proj()
+            self.view = self.camera.get_view()
+        else:
+            pass
+            
         proj_bytes = self.proj.T.tobytes()
         view_bytes = self.view.T.tobytes()
         elapsed = time.time() - getattr(self, '_start_time', 0.0)
@@ -158,9 +166,12 @@ class Mesh:
             self.vao = self.ctx.vertex_array(self.program, [(vbo, '3f', 'in_position')])
 
     def draw(self):
-        if self.vao:
+        if hasattr(self, 'vao') and self.vao:
             self.material.bind(program=self.program)
-            self.vao.render(moderngl.TRIANGLES)
+            if hasattr(self, 'index_count'):
+                self.vao.render(moderngl.TRIANGLES, indices=self.index_count)
+            else:
+                self.vao.render(moderngl.TRIANGLES)
 
 class DebugOverlay:
     """Render a small on-screen text overlay using pygame font -> texture -> moderngl quad."""
@@ -276,39 +287,6 @@ class DebugOverlay:
         self.ctx.disable(moderngl.BLEND)
         self.ctx.enable(moderngl.DEPTH_TEST)
 
-class CubeMesh(Mesh):
-    def __init__(self, ctx):
-        super().__init__(ctx, "default")
-
-    def build_geometry(self):
-        # Share static geometry buffers across all CubeMesh instances per-context
-        cache = getattr(CubeMesh, '_geom_cache', None)
-        if cache is None:
-            cache = {}
-            setattr(CubeMesh, '_geom_cache', cache)
-        key = id(self.ctx)
-        if key not in cache:
-            v = np.array([
-                -1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1,
-                -1,-1,1, 1,-1,1, 1,1,1, -1,1,1,
-                -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1,
-                1,-1,-1, 1,-1,1, 1,1,1, 1,1,-1,
-                -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1,
-                -1,1,-1, 1,1,-1, 1,1,1, -1,1,1
-            ], dtype='f4').reshape(-1, 3)
-
-            i = np.array([
-                0,1,2,2,3,0, 4,5,6,6,7,4, 8,9,10,10,11,8,
-                12,13,14,14,15,12, 16,17,18,18,19,16, 20,21,22,22,23,20
-            ], dtype='i4')
-
-            vbo = self.ctx.buffer(v.tobytes())
-            ibo = self.ctx.buffer(i.tobytes())
-            cache[key] = (vbo, ibo)
-        vbo, ibo = cache[key]
-        # Build a VAO referencing the shared buffers
-        self.vao = self.ctx.vertex_array(self.program, [(vbo, '3f', 'in_position')], index_buffer=ibo)
-
 class Material:
     def __init__(self, color=(0,0,0), tex=None):
         self.color = color
@@ -316,7 +294,10 @@ class Material:
     
     def bind(self, program):
         try:
-            program['u_color'].value = tuple(map(float, self.color))
+            if not self.texture:
+                program['u_color'].value = tuple(map(float, self.color))
+            else:
+                pass
         except KeyError:
             pass          
 
@@ -334,6 +315,8 @@ class Camera:
         self.far = float(far)
         self.fov = float(fov)
         self.aspect = width/height
+        self.yaw = 0.0
+        self.pitch = 0.0
     
     def get_proj(self):
         fov = np.radians(self.fov)
@@ -516,7 +499,4 @@ class SkyBox:
         self.vao.render(moderngl.TRIANGLES)
         ctx.enable(moderngl.DEPTH_TEST)
 
-        
-        
-
-    
+ 

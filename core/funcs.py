@@ -1,4 +1,15 @@
-import pygame, json, moderngl
+import pygame, json, moderngl, trimesh
+
+# core/funcs.py — FINAL WORKING OBJ IMPORT
+
+import numpy as np
+
+def import_obj(path='assets/models/monkey.obj'):
+    mesh = trimesh.load(path, force='mesh')
+    return {
+        'v': (mesh.vertices).astype(np.float32),   # just scale
+        'i': mesh.faces.ravel().astype(np.uint32)
+    }
 
 def path_to_tex(path):
     return surf_to_tex(path_to_surf(path))
