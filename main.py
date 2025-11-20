@@ -7,7 +7,7 @@ renderer = Renderer((1280, 720))
 renderer.set_skybox('assets/skybox')
 
 # Create one cube
-for i in range(10000):
+for i in range(1):
     renderer.add_mesh((CubeMesh(renderer.ctx)))
 
 
