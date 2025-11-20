@@ -364,7 +364,6 @@ class Camera:
     def set_aspect(self, width, height):
         self.aspect = width / height
 
-    
 
 class Light:
     def __init__(self):
