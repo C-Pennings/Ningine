@@ -1,9 +1,10 @@
 # core/render_objects.py
 import moderngl
-import pygame
+import pygame, os
 import numpy as np
 from pygame.math import Vector3
 from pathlib import Path
+from PIL import Image
 import time
 
 class Renderer:
@@ -310,3 +311,52 @@ class Material:
 class DefaultMaterial(Material):
     def __init__(self):
         super().__init__(color=(0.5, 0.5, 0.5))
+
+class Camera:
+    def __init__(self):
+        pass
+
+class Light:
+    def __init__(self):
+        pass
+
+class SkyBox:
+    def __init__(self, ctx, width, height, path='assets/skybox'):
+        
+        self.width, self.height = width, height
+        texture = ctx.texture_cube(size=(self.width, self.height), components=3, data=None)
+        
+        filenames = []
+        if os.path.exists(path) and os.path.isdir(path): #load filenames from path
+            for entry in os.listdir(path):
+                full_path = os.path.join(path, entry)
+                if os.path.isfile(full_path):
+                    filenames.append(entry)
+        
+        for i, filename in enumerate(filenames):
+            img = Image.open(filename).transpose(Image.FLIP_TOP_BOTTOM) # May need adjustment
+            # Ensure image is in RGB format
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Use a consistent size
+            width, height = img.size 
+            
+            # Upload data to the specific face
+            ctx.texture_cube(size=(width, height), components=3, data=img.tobytes(), layer=i)
+            
+        # Configure texture parameters to avoid seams and use linear filtering
+        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        texture.wrap_x = moderngl.CLAMP_TO_EDGE
+        texture.wrap_y = moderngl.CLAMP_TO_EDGE
+        texture.wrap_z = moderngl.CLAMP_TO_EDGE
+
+        self.texture = texture
+    
+    def get_tex(self):
+        return self.texture
+
+        
+        
+
+    
