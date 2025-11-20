@@ -96,10 +96,11 @@ class Renderer:
         pygame.display.flip()
 
 class Mesh:
-    def __init__(self, ctx, shader_name="default"):
+    def __init__(self, ctx, shader_name="default", material = None):
         self.ctx = ctx
         self.program = self._load_shader(shader_name)
         self.vao = None
+        self.material = material or DefaultMaterial()
         self.build_geometry()
 
     def _load_shader(self, name):
@@ -121,6 +122,7 @@ class Mesh:
 
     def draw(self):
         if self.vao:
+            self.material.bind(program=self.program)
             self.vao.render(moderngl.TRIANGLES)
 
 
@@ -258,3 +260,19 @@ class CubeMesh(Mesh):
         ], dtype='i4')
 
         self._upload(v, i)
+
+class Material:
+    def __init__(self, color=(0,0,0)):
+        self.color = color
+    
+    def bind(self, program):
+        try:
+            program['u_color'].value = tuple(map(float, self.color))
+        except KeyError:
+            pass
+        
+           
+
+class DefaultMaterial(Material):
+    def __init__(self):
+        super().__init__(color=(0.5, 0.5, 0.5))
