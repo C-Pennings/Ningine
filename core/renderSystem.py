@@ -15,9 +15,10 @@ class Renderer:
         self.width, self.height = size
         self.meshes = []
 
-        # Fixed camera that shows the cube
-        self.proj = self._perspective()
-        self.view = self._look_at(Vector3(0, -3, 15), Vector3(0, 0, 0), Vector3(0, 1, 0))
+        # Camera setup
+        self.camera = Camera(Vector3(0, -3, 15), self.width, self.height, target=Vector3(0, 0, 0), up=Vector3(0, 1, 0))
+        self.proj = self.camera.get_proj()
+        self.view = self.camera.get_view()
         # Debug overlay (on-screen FPS and info)
         pygame.font.init()
         self._font = pygame.font.SysFont(None, 18)
@@ -66,7 +67,9 @@ class Renderer:
         self.ctx.enable(moderngl.DEPTH_TEST)
 
     def draw_scene(self):
-        # Precompute common state once per frame
+        # Update matrices from camera and precompute common state once per frame
+        self.proj = self.camera.get_proj()
+        self.view = self.camera.get_view()
         proj_bytes = self.proj.T.tobytes()
         view_bytes = self.view.T.tobytes()
         elapsed = time.time() - getattr(self, '_start_time', 0.0)
@@ -307,8 +310,9 @@ class CubeMesh(Mesh):
         self.vao = self.ctx.vertex_array(self.program, [(vbo, '3f', 'in_position')], index_buffer=ibo)
 
 class Material:
-    def __init__(self, color=(0,0,0)):
+    def __init__(self, color=(0,0,0), tex=None):
         self.color = color
+        self.texture = tex
     
     def bind(self, program):
         try:
@@ -321,21 +325,44 @@ class DefaultMaterial(Material):
         super().__init__(color=(0.5, 0.5, 0.5))
 
 class Camera:
-    def __init__(self, pos, width, height, rot=(0,0,0)):
+    def __init__(self, pos, width, height, rot=(0,0,0), target=None, up=None, near=0.1, far=100.0, fov=45.0):
         self.position = pos
         self.rotation = rot
-
-        self.fov = 45
+        self.target = target if target is not None else Vector3(0, 0, 0)
+        self.up = up if up is not None else Vector3(0, 1, 0)
+        self.near = float(near)
+        self.far = float(far)
+        self.fov = float(fov)
         self.aspect = width/height
     
     def get_proj(self):
-        pass
+        fov = np.radians(self.fov)
+        f = 1.0 / np.tan(fov / 2.0)
+        n, fa = self.near, self.far
+        a = self.aspect
+        return np.array([
+            [f / a, 0.0, 0.0, 0.0],
+            [0.0, f, 0.0, 0.0],
+            [0.0, 0.0, (fa + n) / (n - fa), (2 * fa * n) / (n - fa)],
+            [0.0, 0.0, -1.0, 0.0]
+        ], dtype='f4')
 
     def get_view(self):
-        pass
+        eye = self.position
+        target = self.target
+        up = self.up
+        f = (target - eye).normalize()
+        s = f.cross(up).normalize()
+        u = s.cross(f)
+        return np.array([
+            [s.x, s.y, s.z, -s.dot(eye)],
+            [u.x, u.y, u.z, -u.dot(eye)],
+            [-f.x, -f.y, -f.z, f.dot(eye)],
+            [0, 0, 0, 1]
+        ], dtype='f4')
 
-    def set_aspect(self):
-        pass
+    def set_aspect(self, width, height):
+        self.aspect = width / height
 
     
 
